@@ -22,6 +22,9 @@
           <router-link to="/demand" :class="{ active: $route.path === '/demand' }">
             {{ t('nav.demandForecast') }}
           </router-link>
+          <router-link to="/restocking" :class="{ active: $route.path === '/restocking' }">
+            {{ t('nav.restocking') }}
+          </router-link>
           <router-link to="/reports" :class="{ active: $route.path === '/reports' }">
             Reports
           </router-link>
@@ -55,8 +58,7 @@
 </template>
 
 <script>
-import { ref, onMounted, computed } from 'vue'
-import { api } from './api'
+import { ref, computed } from 'vue'
 import { useAuth } from './composables/useAuth'
 import { useI18n } from './composables/useI18n'
 import FilterBar from './components/FilterBar.vue'
@@ -79,74 +81,49 @@ export default {
     const { t } = useI18n()
     const showProfileDetails = ref(false)
     const showTasks = ref(false)
-    const apiTasks = ref([])
 
-    // Merge mock tasks from currentUser with API tasks
+    // Local tasks added at runtime (no backend persistence needed)
+    const localTasks = ref([])
+
+    // Merge mock tasks from currentUser with locally added tasks
     const tasks = computed(() => {
-      return [...currentUser.value.tasks, ...apiTasks.value]
+      return [...currentUser.value.tasks, ...localTasks.value]
     })
 
-    const loadTasks = async () => {
-      try {
-        apiTasks.value = await api.getTasks()
-      } catch (err) {
-        console.error('Failed to load tasks:', err)
+    const addTask = (taskData) => {
+      const newTask = {
+        id: 'task-' + Date.now(),
+        status: 'pending',
+        ...taskData
       }
+      // Add new task to the beginning of the local array
+      localTasks.value.unshift(newTask)
     }
 
-    const addTask = async (taskData) => {
-      try {
-        const newTask = await api.createTask(taskData)
-        // Add new task to the beginning of the array
-        apiTasks.value.unshift(newTask)
-      } catch (err) {
-        console.error('Failed to add task:', err)
+    const deleteTask = (taskId) => {
+      // Check if it's a mock task from currentUser
+      const mockIndex = currentUser.value.tasks.findIndex(t => t.id === taskId)
+      if (mockIndex !== -1) {
+        currentUser.value.tasks.splice(mockIndex, 1)
+        return
       }
+      // Otherwise remove from local tasks
+      localTasks.value = localTasks.value.filter(t => t.id !== taskId)
     }
 
-    const deleteTask = async (taskId) => {
-      try {
-        // Check if it's a mock task (from currentUser)
-        const isMockTask = currentUser.value.tasks.some(t => t.id === taskId)
-
-        if (isMockTask) {
-          // Remove from mock tasks
-          const index = currentUser.value.tasks.findIndex(t => t.id === taskId)
-          if (index !== -1) {
-            currentUser.value.tasks.splice(index, 1)
-          }
-        } else {
-          // Remove from API tasks
-          await api.deleteTask(taskId)
-          apiTasks.value = apiTasks.value.filter(t => t.id !== taskId)
-        }
-      } catch (err) {
-        console.error('Failed to delete task:', err)
+    const toggleTask = (taskId) => {
+      // Check if it's a mock task from currentUser
+      const mockTask = currentUser.value.tasks.find(t => t.id === taskId)
+      if (mockTask) {
+        mockTask.status = mockTask.status === 'pending' ? 'completed' : 'pending'
+        return
+      }
+      // Otherwise toggle in local tasks
+      const localTask = localTasks.value.find(t => t.id === taskId)
+      if (localTask) {
+        localTask.status = localTask.status === 'pending' ? 'completed' : 'pending'
       }
     }
-
-    const toggleTask = async (taskId) => {
-      try {
-        // Check if it's a mock task (from currentUser)
-        const mockTask = currentUser.value.tasks.find(t => t.id === taskId)
-
-        if (mockTask) {
-          // Toggle mock task status
-          mockTask.status = mockTask.status === 'pending' ? 'completed' : 'pending'
-        } else {
-          // Toggle API task
-          const updatedTask = await api.toggleTask(taskId)
-          const index = apiTasks.value.findIndex(t => t.id === taskId)
-          if (index !== -1) {
-            apiTasks.value[index] = updatedTask
-          }
-        }
-      } catch (err) {
-        console.error('Failed to toggle task:', err)
-      }
-    }
-
-    onMounted(loadTasks)
 
     return {
       t,

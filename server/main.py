@@ -120,6 +120,30 @@ class CreatePurchaseOrderRequest(BaseModel):
     expected_delivery_date: str
     notes: Optional[str] = None
 
+class RestockingOrderItem(BaseModel):
+    sku: str
+    name: str
+    quantity_to_order: int
+    unit_cost: float
+    lead_time_days: int
+
+class RestockingOrder(BaseModel):
+    id: str
+    order_number: str
+    order_date: str
+    status: str
+    items: List[RestockingOrderItem]
+    total_cost: float
+    expected_delivery: str
+    notes: Optional[str] = None
+
+class CreateRestockingOrderRequest(BaseModel):
+    items: List[dict]
+    notes: Optional[str] = None
+
+# In-memory store for restocking orders (cleared on server restart)
+restocking_orders: list = []
+
 # API endpoints
 @app.get("/")
 def root():
@@ -303,6 +327,44 @@ def get_monthly_trends():
     result = list(months.values())
     result.sort(key=lambda x: x['month'])
     return result
+
+@app.get("/api/restocking-orders", response_model=List[RestockingOrder])
+def get_restocking_orders():
+    """Get all submitted restocking orders"""
+    return restocking_orders
+
+@app.post("/api/restocking-orders", response_model=RestockingOrder, status_code=201)
+def create_restocking_order(request: CreateRestockingOrderRequest):
+    """Create a new restocking order with per-item random lead times"""
+    import random
+    from datetime import datetime, timedelta
+
+    if not request.items:
+        raise HTTPException(status_code=400, detail="No items provided")
+
+    order_id = str(len(restocking_orders) + 1)
+    order_number = f"RST-{datetime.now().strftime('%Y')}-{order_id.zfill(4)}"
+    now = datetime.now()
+
+    items_with_lead = []
+    max_lead = 0
+    for item in request.items:
+        lead = random.randint(7, 21)
+        max_lead = max(max_lead, lead)
+        items_with_lead.append({**item, "lead_time_days": lead})
+
+    order = {
+        "id": order_id,
+        "order_number": order_number,
+        "order_date": now.isoformat(),
+        "status": "Processing",
+        "items": items_with_lead,
+        "total_cost": round(sum(i["quantity_to_order"] * i["unit_cost"] for i in items_with_lead), 2),
+        "expected_delivery": (now + timedelta(days=max_lead)).isoformat(),
+        "notes": request.notes,
+    }
+    restocking_orders.append(order)
+    return order
 
 if __name__ == "__main__":
     import uvicorn
